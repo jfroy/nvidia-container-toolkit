@@ -42,11 +42,16 @@ func main() {
 		}
 		argv := []string{"runc"}
 		argv = append(argv, os.Args[1:]...)
-		execve(program, argv, os.Environ())
+		if err := unix.Exec(program, argv, os.Environ()); err != nil {
+			log.Fatalf("failed to exec %s: %v", program, err)
+		}
 	}
 	argv := makeArgv(program)
 	envv := makeEnvv(program)
-	execve(program+".real", argv, envv)
+	if err := unix.Exec(program+".real", argv, envv); err != nil {
+		log.Fatalf("failed to exec %s: %v", program+".real", err)
+	}
+
 }
 
 func isRuntimeWrapper(program string) bool {
@@ -106,10 +111,4 @@ func makeEnvv(program string) []string {
 		log.Fatalf("failed to read argv file: %v", err)
 	}
 	return append(env, os.Environ()...)
-}
-
-func execve(program string, argv []string, envv []string) {
-	if err := unix.Exec(program, argv, envv); err != nil {
-		log.Fatalf("failed to exec %s: %v", program, err)
-	}
 }
