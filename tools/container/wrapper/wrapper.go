@@ -22,8 +22,6 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -34,35 +32,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to get executable: %v", err)
 	}
-	if isRuntimeWrapper(program) && !isNvidiaModuleLoaded() {
-		log.Println("nvidia driver modules are not yet loaded, invoking runc directly")
-		program, err := exec.LookPath("runc")
-		if err != nil {
-			log.Fatalf("failed to find runc: %v", err)
-		}
-		argv := []string{"runc"}
-		argv = append(argv, os.Args[1:]...)
-		if err := unix.Exec(program, argv, os.Environ()); err != nil {
-			log.Fatalf("failed to exec %s: %v", program, err)
-		}
-	}
 	argv := makeArgv(program)
 	envv := makeEnvv(program)
 	if err := unix.Exec(program+".real", argv, envv); err != nil {
 		log.Fatalf("failed to exec %s: %v", program+".real", err)
 	}
 
-}
-
-func isRuntimeWrapper(program string) bool {
-	return filepath.Base(program) == "nvidia-container-runtime" ||
-		filepath.Base(program) == "nvidia-container-runtime.cdi" ||
-		filepath.Base(program) == "nvidia-container-runtime.legacy"
-}
-
-func isNvidiaModuleLoaded() bool {
-	_, err := os.Stat("/proc/driver/nvidia/version")
-	return err == nil
 }
 
 func makeArgv(program string) []string {
