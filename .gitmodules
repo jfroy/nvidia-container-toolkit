@@ -1,4 +1,4 @@
 [submodule "third_party/libnvidia-container"]
 	path = third_party/libnvidia-container
-	url = https://github.com/NVIDIA/libnvidia-container.git
+	url = https://github.com/jfroy/libnvidia-container.git
 	branch = main
