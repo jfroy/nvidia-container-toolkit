@@ -115,6 +115,7 @@ jobs:
       - name: Build image
         run: |
           make -f deployments/container/Makefile build-ubuntu20.04 \
-            PUSH_ON_BUILD="true" \
             BUILD_MULTI_ARCH_IMAGES="true" \
-            IMAGE_NAME=ghcr.io/${{ github.actor }}/container-toolkit
+            IMAGE_NAME=ghcr.io/${{ github.actor }}/container-toolkit \
+            PACKAGE_DIST=ubuntu20.04 \
+            PUSH_ON_BUILD="true"
