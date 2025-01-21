@@ -23,39 +23,75 @@ on:
 
 jobs:
   packages:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         target:
-          - centos7-aarch64
-          - centos7-x86_64
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.target.runner }}
     steps:
       - uses: actions/checkout@v4
         name: Check out code
         with:
           submodules: recursive
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: build ${{ matrix.target }} packages
+      - name: libnvidia-container
         run: |
-          sudo apt-get install -y coreutils build-essential sed git bash make
-          echo "Building packages"
-          ./scripts/build-packages.sh ${{ matrix.target }}
+          REVISION=$(git -C third_party/libnvidia-container rev-parse HEAD)
+          BUILDX_TAG=nvidia/libnvidia-container/ubuntu20.04-${{ matrix.target.arch }}
+          DIST=./dist/ubuntu20.04/${{ matrix.target.arch }}
+          mkdir -p $DIST
+          docker buildx build \
+            --platform=linux/${{ matrix.target.arch }} \
+            --progress=plain \
+            --build-arg BASEIMAGE="ubuntu:20.04" \
+            --build-arg OS_VERSION="20.04" \
+            --build-arg OS_ARCH="${{ matrix.target.arch }}" \
+            --build-arg GOLANG_VERSION="1.17.1" \
+            --build-arg WITH_NVCGO="yes" \
+            --build-arg WITH_LIBELF="no" \
+            --build-arg WITH_TIRPC="no" \
+            --build-arg WITH_SECCOMP="yes" \
+            --build-arg CFLAGS="" \
+            --build-arg LDLIBS="" \
+            --build-arg REVISION="$REVISION" \
+            --build-arg LIB_VERSION="1.17.4" \
+            --build-arg LIB_TAG="" \
+            --build-arg LIB_BUILD="" \
+            --load \
+            --tag $BUILDX_TAG \
+            --file third_party/libnvidia-container/mk/Dockerfile.ubuntu third_party/libnvidia-container/
+          docker run --rm --platform linux/${{ matrix.target.arch }} -v $DIST:/dist $BUILDX_TAG:latest
+      - name: toolkit
+        run: |
+          BUILDX_TAG=nvidia/nvidia-container-toolkit/ubuntu20.04-${{ matrix.target.arch }}
+          DIST=./dist/ubuntu20.04/${{ matrix.target.arch }}
+          mkdir -p $DIST
+          docker build \
+            --platform=linux/${{ matrix.target.arch }} \
+            --progress=plain \
+            --build-arg BASEIMAGE="ubuntu:20.04" \
+            --build-arg GOLANG_VERSION="1.23.4" \
+            --build-arg PKG_NAME="nvidia-container-toolkit" \
+            --build-arg PKG_VERS="1.17.4" \
+            --build-arg PKG_REV="1" \
+            --build-arg LIBNVIDIA_CONTAINER_TOOLS_VERSION="1.17.4-1" \
+            --build-arg GIT_COMMIT="${{ github.sha }}" \
+            --tag $BUILDX_TAG \
+            --file docker/Dockerfile.ubuntu .
+          docker run --rm --platform linux/${{ matrix.target.arch }} -v $DIST:/dist $BUILDX_TAG:latest
       - name: 'Upload Artifacts'
         uses: actions/upload-artifact@v4
         with:
+          name: nvidia-container-toolkit-ubuntu20.04-${{ matrix.target.arch }}-${{ github.run_id }}
+          path: dist/*
           compression-level: 0
-          name: toolkit-container-${{ matrix.target }}-${{ github.run_id }}
-          path: ${{ github.workspace }}/dist/*
 
   image:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dist:
-          - ubi8
+    runs-on: ubuntu-24.04
     needs: packages
     steps:
       - uses: actions/checkout@v4
@@ -64,11 +100,11 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Get built packages
+      - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          path: ${{ github.workspace }}/dist/
-          pattern: toolkit-container-*-${{ github.run_id }}
+          path: dist/
+          pattern: nvidia-container-toolkit-ubuntu20.04-*-${{ github.run_id }}
           merge-multiple: true
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -77,7 +113,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build image
-        env:
-          IMAGE_NAME: ghcr.io/${{ github.actor }}/container-toolkit
         run: |
-          make -f deployments/container/Makefile build-${{ matrix.dist }} PUSH_ON_BUILD="true" BUILD_MULTI_ARCH_IMAGES="true"
+          make -f deployments/container/Makefile build-ubuntu20.04 \
+            PUSH_ON_BUILD="true" \
+            BUILD_MULTI_ARCH_IMAGES="true" \
+            IMAGE_NAME=ghcr.io/${{ github.actor }}/container-toolkit
