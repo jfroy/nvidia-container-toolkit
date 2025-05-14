@@ -118,4 +118,5 @@ jobs:
             BUILD_MULTI_ARCH_IMAGES="true" \
             IMAGE_NAME=ghcr.io/${{ github.actor }}/container-toolkit \
             PACKAGE_DIST=ubuntu20.04 \
-            PUSH_ON_BUILD="true"
+            PUSH_ON_BUILD="true" \
+            VERSION=1.17.6
