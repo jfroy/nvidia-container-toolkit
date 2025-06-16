@@ -58,7 +58,7 @@ jobs:
             --build-arg CFLAGS="" \
             --build-arg LDLIBS="" \
             --build-arg REVISION="$REVISION" \
-            --build-arg LIB_VERSION="1.17.6" \
+            --build-arg LIB_VERSION="1.17.8" \
             --build-arg LIB_TAG="" \
             --build-arg LIB_BUILD="" \
             --load \
@@ -76,9 +76,9 @@ jobs:
             --build-arg BASEIMAGE="ubuntu:20.04" \
             --build-arg GOLANG_VERSION="1.23.4" \
             --build-arg PKG_NAME="nvidia-container-toolkit" \
-            --build-arg PKG_VERS="1.17.6" \
+            --build-arg PKG_VERS="1.17.8" \
             --build-arg PKG_REV="1" \
-            --build-arg LIBNVIDIA_CONTAINER_TOOLS_VERSION="1.17.6-1" \
+            --build-arg LIBNVIDIA_CONTAINER_TOOLS_VERSION="1.17.8" \
             --build-arg GIT_COMMIT="${{ github.sha }}" \
             --tag $BUILDX_TAG \
             --file docker/Dockerfile.ubuntu .
@@ -119,4 +119,4 @@ jobs:
             IMAGE_NAME=ghcr.io/${{ github.actor }}/container-toolkit \
             PACKAGE_DIST=ubuntu20.04 \
             PUSH_ON_BUILD="true" \
-            VERSION=1.17.6
+            VERSION=1.17.8
