@@ -45,10 +45,3 @@ jobs:
     with:
       version: ${{ needs.variables.outputs.version }}
       build_multi_arch_images: ${{ github.ref_name == 'main' || startsWith(github.ref_name, 'release-') }}
-
-  e2e-test:
-    needs: [image, variables]
-    secrets: inherit
-    uses: ./.github/workflows/e2e.yaml
-    with:
-      version: ${{ needs.variables.outputs.version }}

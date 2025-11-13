@@ -77,7 +77,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: linux-amd64-cpu4
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
@@ -96,11 +96,5 @@ jobs:
         with:
           go-version: ${{ env.GOLANG_VERSION }}
 
-      - name: Setup Go Proxy
-        id: setup-go-proxy
-        uses: nv-gha-runners/setup-artifactory-go-proxy@main
-
-      - env:
-          GOPROXY: ${{ steps.setup-go-proxy.outputs.goproxy-url }}
-        run: |
+      - run: |
           make build
