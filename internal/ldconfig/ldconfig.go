@@ -103,11 +103,10 @@ ldconfig in the container. Such differences include system search paths.`)
 	}
 
 	l := &Ldconfig{
-		ldconfigPath:          *ldconfigPath,
-		inRoot:                *containerRoot,
-		isDebianLikeHost:      *isDebianLikeHost,
-		isDebianLikeContainer: isDebian(),
-		directories:           fs.Args(),
+		ldconfigPath:     *ldconfigPath,
+		inRoot:           *containerRoot,
+		isDebianLikeHost: *isDebianLikeHost,
+		directories:      fs.Args(),
 	}
 	return l, nil
 }
@@ -117,6 +116,9 @@ func (l *Ldconfig) UpdateLDCache() error {
 	if err != nil {
 		return err
 	}
+
+	// `prepareRoot` pivots to the container root, so can now set the container "debian-ness".
+	l.isDebianLikeContainer = isDebian()
 
 	// Explicitly specify using /etc/ld.so.conf since the host's ldconfig may
 	// be configured to use a different config file by default.
