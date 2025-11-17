@@ -123,7 +123,7 @@ func (l *Ldconfig) UpdateLDCache() error {
 	// Explicitly specify using /etc/ld.so.conf since the host's ldconfig may
 	// be configured to use a different config file by default.
 	const topLevelLdsoconfFilePath = "/etc/ld.so.conf"
-	filteredDirectories, ldconfigDirs, err := l.filterDirectories(topLevelLdsoconfFilePath, l.directories...)
+	filteredDirectories, err := l.filterDirectories(topLevelLdsoconfFilePath, l.directories...)
 	if err != nil {
 		return err
 	}
@@ -133,22 +133,19 @@ func (l *Ldconfig) UpdateLDCache() error {
 		"-f", topLevelLdsoconfFilePath,
 		"-C", "/etc/ld.so.cache",
 	}
-	// If we are running in a non-debian container on a debian host we also
-	// need to add the system directories for non-debian hosts to the list of
-	// folders processed by ldconfig.
-	// We only do this if they are not already tracked, since the folders on
-	// on the command line have a higher priority than folders in ld.so.conf.
-	if l.isDebianLikeHost && !l.isDebianLikeContainer {
-		for _, systemSearchPath := range l.getSystemSearchPaths() {
-			if _, ok := ldconfigDirs[systemSearchPath]; ok {
-				continue
-			}
-			args = append(args, "/lib64", "/usr/lib64")
-		}
-	}
 
 	if err := createLdsoconfdFile(ldsoconfdFilenamePattern, filteredDirectories...); err != nil {
 		return fmt.Errorf("failed to update ld.so.conf.d: %w", err)
+	}
+
+	// In most cases, the hook will be executing a host ldconfig that may be configured widely
+	// differently from what the container image expects. The common case is Debian vs non-Debian.
+	// But there are also hosts that configure ldconfig to search in a glibc prefix
+	// (e.g. /usr/lib/glibc). To avoid all these cases, append the container's expected system
+	// search paths to the top-level ld.so.conf. This will ensure they get scanned but won't
+	// materially change the scan order.
+	if err := appendSystemSearchPathsToLdsoconf(topLevelLdsoconfFilePath, l.getSystemSearchPaths()...); err != nil {
+		return fmt.Errorf("failed to append system search paths to %s: %w", topLevelLdsoconfFilePath, err)
 	}
 
 	return SafeExec(ldconfigPath, args, nil)
@@ -183,10 +180,10 @@ func (l *Ldconfig) prepareRoot() (string, error) {
 	return ldconfigPath, nil
 }
 
-func (l *Ldconfig) filterDirectories(configFilePath string, directories ...string) ([]string, map[string]struct{}, error) {
+func (l *Ldconfig) filterDirectories(configFilePath string, directories ...string) ([]string, error) {
 	ldconfigDirs, err := l.getLdsoconfDirectories(configFilePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var filtered []string
@@ -197,7 +194,7 @@ func (l *Ldconfig) filterDirectories(configFilePath string, directories ...strin
 		filtered = append(filtered, d)
 		ldconfigDirs[d] = struct{}{}
 	}
-	return filtered, ldconfigDirs, nil
+	return filtered, nil
 }
 
 // createLdsoconfdFile creates a file at /etc/ld.so.conf.d/.
@@ -238,6 +235,24 @@ func createLdsoconfdFile(pattern string, dirs ...string) error {
 		return fmt.Errorf("failed to chmod config file: %w", err)
 	}
 
+	return nil
+}
+
+func appendSystemSearchPathsToLdsoconf(configFilePath string, dirs ...string) error {
+	if len(dirs) == 0 {
+		return nil
+	}
+	configFile, err := os.OpenFile(configFilePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer configFile.Close()
+	for _, dir := range dirs {
+		_, err = fmt.Fprintf(configFile, "%s\n", dir)
+		if err != nil {
+			return fmt.Errorf("failed to update config file: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -324,22 +339,61 @@ func isDebian() bool {
 	return !info.IsDir()
 }
 
-// nonDebianSystemSearchPaths returns the system search paths for non-Debian
-// systems.
+// nonDebianSystemSearchPaths returns the system search paths for non-Debian systems.
 //
-// This list was taken from the output of:
+// glibc ldconfig's calls `add_system_dir` with `SLIBDIR` and `LIBDIR` (if they are not equal). On
+// aarch64 and x86_64, `add_system_dir` is a macro that scans the provided path. If the path ends
+// with "/lib64" (or "/libx32", x86_64 only), it strips those suffixes. Then it registers the
+// resulting path. Then if the path ends with "/lib", it registers "path"+"64" (and "path"+"x32",
+// x86_64 only).
 //
-//	docker run --rm -ti redhat/ubi9 /usr/lib/ld-linux-aarch64.so.1 --help | grep -A6 "Shared library search path"
+// By default, "LIBDIR" is "/usr/lib" and "SLIBDIR" is "/lib". Note that on modern distributions,
+// "/lib" is usually a symlink to "/usr/lib" and "/lib64" to "/usr/lib64". ldconfig resolves
+// symlinks and skips duplicate directory entries.
+//
+// To get the list of system paths, you can invoke the dynamic linker with `--list-diagnostics` and
+// look for "path.system_dirs". For example
+// `docker run --rm -ti fedora:latest /lib64/ld-linux-x86-64.so.2 --list-diagnostics | grep path.system_dirs`.
+//
+// On most distributions, including Fedora and derivatives, this yields the following
+// ldconfig system search paths.
+//
+// TODO: Add other architectures that have custom `add_system_dir` macros (e.g. riscv)
+// TODO: Replace with executing the container's dynamlic linker with `--list-diagnostics`?
 func nonDebianSystemSearchPaths() []string {
-	return []string{"/lib64", "/usr/lib64"}
+	var paths []string
+	paths = append(paths, "/lib", "/usr/lib")
+	switch runtime.GOARCH {
+	case "amd64":
+		paths = append(paths,
+			"/lib/lib64",
+			"/usr/lib64",
+			"/libx32",
+			"/usr/libx32",
+		)
+	case "arm64":
+		paths = append(paths,
+			"/lib/lib64",
+			"/usr/lib64",
+		)
+	}
+	return paths
 }
 
-// debianSystemSearchPaths returns the system search paths for Debian-like
-// systems.
+// debianSystemSearchPaths returns the system search paths for Debian-like systems.
 //
-// This list was taken from the output of:
+// Debian (and derivatives) apply their multi-arch patch to glibc, which modifies ldconfig to
+// use the same set of system paths as the dynamic linker. These paths are going to include the
+// multi-arch directory _and_ by default "/lib" and "/usr/lib" for compatibility.
 //
-//	docker run --rm -ti ubuntu /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 --help | grep -A6 "Shared library search path"
+// To get the list of system paths, you can invoke the dynamic linker with `--list-diagnostics` and
+// look for "path.system_dirs". For example
+// `docker run --rm -ti ubuntu:latest /lib64/ld-linux-x86-64.so.2 --list-diagnostics | grep path.system_dirs`.
+//
+// This yields the following ldconfig system search paths.
+//
+// TODO: Add other architectures that have custom `add_system_dir` macros (e.g. riscv)
+// TODO: Replace with executing the container's dynamlic linker with `--list-diagnostics`?
 func debianSystemSearchPaths() []string {
 	var paths []string
 	switch runtime.GOARCH {
@@ -355,6 +409,5 @@ func debianSystemSearchPaths() []string {
 		)
 	}
 	paths = append(paths, "/lib", "/usr/lib")
-
 	return paths
 }

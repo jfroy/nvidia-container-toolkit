@@ -19,6 +19,7 @@ package ldconfig
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,10 +118,79 @@ include INCLUDED_PATTERN*
 			l := &Ldconfig{
 				isDebianLikeContainer: true,
 			}
-			filtered, _, err := l.filterDirectories(topLevelConfPath, tc.input...)
+			filtered, err := l.filterDirectories(topLevelConfPath, tc.input...)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, filtered)
+		})
+	}
+}
+
+func TestAppendSystemSearchPathsToLdsoconf(t *testing.T) {
+	testCases := []struct {
+		description    string
+		initialContent string
+		noFile         bool
+		dirs           []string
+		expectedFinal  string
+		expectError    bool
+	}{
+		{
+			description:    "append to empty file",
+			initialContent: "",
+			dirs:           []string{"/lib", "/usr/lib"},
+			expectedFinal:  "/lib\n/usr/lib\n",
+		},
+		{
+			description:    "append to existing content",
+			initialContent: "# existing config\n/existing/path\n",
+			dirs:           []string{"/lib", "/usr/lib"},
+			expectedFinal:  "# existing config\n/existing/path\n/lib\n/usr/lib\n",
+		},
+		{
+			description:    "append empty does nothing",
+			initialContent: "# existing config\n",
+			dirs:           []string{},
+			expectedFinal:  "# existing config\n",
+		},
+		{
+			description: "append empty does not create file",
+			noFile:      true,
+			dirs:        []string{},
+		},
+		{
+			description: "append to non-existent file fails",
+			noFile:      true,
+			dirs:        []string{"/lib"},
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "ld.so.conf")
+
+			if !tc.noFile {
+				err := os.WriteFile(configPath, []byte(tc.initialContent), 0644)
+				require.NoError(t, err)
+			}
+
+			err := appendSystemSearchPathsToLdsoconf(configPath, tc.dirs...)
+			if tc.expectError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			if !tc.noFile {
+				content, err := os.ReadFile(configPath)
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedFinal, string(content))
+			} else {
+				_, err := os.Stat(configPath)
+				require.True(t, os.IsNotExist(err))
+			}
 		})
 	}
 }
